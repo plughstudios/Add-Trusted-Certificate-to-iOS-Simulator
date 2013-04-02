@@ -71,18 +71,16 @@ def add_to_truststore(sdk_dir, cert_fingerprint):
         return
 
 if __name__ == "__main__":
-    from optparse import OptionParser
-    parser = OptionParser(usage=__usage__)
-    opt, args = parser.parse_args()
+    import sys
 
-    if len(args) < 1:
-        parser.print_help()
-        exit(1)
-
-    cert_location = args[0]
-
-    cert_fingerprint = cert_fingerprint(cert_location)
+    if not sys.argv[1:]:
+        print(__usage__)
+        sys.exit(1)
 
     for sdk_dir in os.listdir(simulator_dir):
-        if not sdk_dir.startswith('.') and sdk_dir != 'User':
-            add_to_truststore(sdk_dir, cert_fingerprint)
+        for cert_location in sys.argv[1:]:
+
+            cert_fingerprint = cert_fingerprint(cert_location)
+
+            if not sdk_dir.startswith('.') and sdk_dir != 'User':
+                add_to_truststore(sdk_dir, cert_fingerprint)
