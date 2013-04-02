@@ -17,9 +17,9 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 '''
+from M2Crypto import X509   
 import os
 import sqlite3
-import subprocess
 
 __usage__ = """
 Please supply required arguments: <CA Certificate Path>
@@ -29,21 +29,6 @@ Please supply required arguments: <CA Certificate Path>
 
 simulator_dir = os.getenv('HOME')+"/Library/Application Support/iPhone Simulator/"
 truststore_path = "/Library/Keychains/TrustStore.sqlite3"
-
-
-def cert_fingerprint_via_openssl(cert_location):
-    output = subprocess.check_output(["openssl", "x509", "-noout", "-in", cert_location, "-fingerprint"])
-    fingerprint_with_colons = output.split("=")[1]
-    return fingerprint_with_colons.replace(':','')
-
-
-def cert_fingerprint(cert_location):
-    try:
-        from M2Crypto import X509   
-        cert = X509.load_cert(cert_location)
-        return cert.get_fingerprint('sha1')
-    except ImportError:
-        return cert_fingerprint_via_openssl(cert_location)  
 
 
 def add_to_truststore(sdk_dir, cert_fingerprint):
@@ -78,9 +63,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     for sdk_dir in os.listdir(simulator_dir):
-        for cert_location in sys.argv[1:]:
+        for certfile in sys.argv[1:]:
 
-            cert_fingerprint = cert_fingerprint(cert_location)
+            cert = X509.load_cert(certfile)
 
             if not sdk_dir.startswith('.') and sdk_dir != 'User':
-                add_to_truststore(sdk_dir, cert_fingerprint)
+                add_to_truststore(sdk_dir, cert.get_fingerprint('sha1'))
