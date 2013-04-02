@@ -27,33 +27,33 @@ Please supply required arguments: <CA Certificate Path>
     add_ca_to_iossim.py <CA Certificate Path>
 """
 
-simulator_dir = os.getenv('HOME')+"/Library/Application Support/iPhone Simulator/"
-truststore_path = "/Library/Keychains/TrustStore.sqlite3"
+SIMULATOR_HOME = os.path.join(os.getenv('HOME'), 'Library',
+                              'Application Support', 'iPhone Simulator')
+TRUSTSTORE_PATH = '/Library/Keychains/TrustStore.sqlite3'
 
 
-def add_to_truststore(sdk_dir, cert_fingerprint):
-    tpath = simulator_dir+sdk_dir+truststore_path
+def add_certificates_to_truststore(truststore, *certificates):
+    for certificate in certificates:
+        sha1="X'"+certificate.get_fingerprint('sha1').strip()+"'"
 
-    sha1="X'"+cert_fingerprint.strip()+"'"
+        try:
+            conn = sqlite3.connect(truststore)
+            c = conn.cursor()
+            sql = 'insert into tsettings values (%s,%s,%s,%s)'%(sha1, "randomblob(16)", "randomblob(16)", "randomblob(16)")
+            c.execute(sql)
+            conn.commit()
 
-    try:
-        conn = sqlite3.connect(simulator_dir+sdk_dir+truststore_path)
-        c = conn.cursor()
-        sql = 'insert into tsettings values (%s,%s,%s,%s)'%(sha1, "randomblob(16)", "randomblob(16)", "randomblob(16)")
-        c.execute(sql)
-        conn.commit()
-
-        c.close()
-        conn.close()
-        print("Successfully added CA to %s" % tpath) 
-    except sqlite3.OperationalError:
-        print("Error adding CA to %s" % tpath )
-        print("Mostly likely failed because Truststore does not exist..skipping\n")
-        return
-    except sqlite3.IntegrityError:
-        print("Error adding CA to %s" % tpath )
-        print("Table already has an entry with the same CA SHA1 fingerprint..skipping\n")
-        return
+            c.close()
+            conn.close()
+            print("Successfully added CA to %s" % truststore) 
+        except sqlite3.OperationalError:
+            print("Error adding CA to %s" % truststore)
+            print("Mostly likely failed because Truststore does not exist..skipping\n")
+            return
+        except sqlite3.IntegrityError:
+            print("Error adding CA to %s" % truststore)
+            print("Table already has an entry with the same CA SHA1 fingerprint..skipping\n")
+            return
 
 if __name__ == "__main__":
     import sys
@@ -62,10 +62,18 @@ if __name__ == "__main__":
         print(__usage__)
         sys.exit(1)
 
-    for sdk_dir in os.listdir(simulator_dir):
-        for certfile in sys.argv[1:]:
+    certificates = []
 
-            cert = X509.load_cert(certfile)
+    for certfile in sys.argv[1:]:
+        certext = os.path.splitext(certfile)[-1].lower()
 
-            if not sdk_dir.startswith('.') and sdk_dir != 'User':
-                add_to_truststore(sdk_dir, cert.get_fingerprint('sha1'))
+        if certext == 'der':
+            certificates.append(X509.load_cert(certfile, X509.FORMAT_DER))
+        elif certext == 'pem':
+            certificates.append(X509.load_cert(certfile, X509.FORMAT_PEM))
+
+    for sdk_dir in os.listdir(SIMULATOR_HOME):
+        if not sdk_dir.startswith('.') and sdk_dir != 'User':
+            truststore = os.path.join(SIMULATOR_HOME, sdk_dir,
+                    *TRUSTSTORE_PATH.split('/'))
+            add_certificates_to_truststore(truststore, *certificates)
