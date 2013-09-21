@@ -27,33 +27,53 @@ __usage__ = """Please supply required arguments: <CA Certificate Path>
 
 Usage: %s [CA Certificate Path ...]""" % (sys.argv[0], )
 
+def normalize_subject(subject):
+    # normalize the subject to make Apple happy - subject is forced to all caps (possibly other transformations?) when trusted by Apple - simulate this
+    new_subject = X509.X509_Name()
 
-SIMULATOR_HOME = os.path.join(os.getenv('HOME'), 'Library',
-                              'Application Support', 'iPhone Simulator')
-TRUSTSTORE_PATH = '/Library/Keychains/TrustStore.sqlite3'
+    interesting_keys = ['C','ST','L','O','OU','CN','Email','serialNumber','SN','GN']
+    for key in interesting_keys:
+      v = getattr(subject, key)
+      if v is not None:
+        setattr(new_subject, key, v.upper())
 
+    return new_subject
+
+def subject_as_der(subject):
+    subject_der = subject.as_der()
+    # subject der encoding is returning two leading bytes (0x30, 0x70) that Apple doesn't grok - pop them off
+    # TODO: determine what these leading bytes are and if we can get rid of them a saner way
+    subject_der = subject_der[2:]
+
+    return subject_der
 
 def add_certificates_to_truststore(truststore, *certificates):
     conn = sqlite3.connect(truststore)
 
     try:
         for certificate in certificates:
-            sha1 = "X'{0}'".format(certificate.get_fingerprint('sha1'))
-            subj = "X'{0}'".format(certificate.get_subject().as_der().encode('hex'))
-            tset = "X'{0}'".format("""<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><array/></plist>""".encode('hex'))
-            data = "X'{0}'".format(certificate.as_der().encode('hex'))
+            subject = normalize_subject(certificate.get_subject())
+            subject_der = subject_as_der(subject)
+
+            sha1 = sqlite3.Binary(certificate.get_fingerprint('sha1').decode('hex'))
+            subj = sqlite3.Binary(subject_der)
+            tset = sqlite3.Binary("""<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><array/></plist>""")
+            data = sqlite3.Binary(certificate.as_der())
 
             try:
                 c = conn.cursor()
                 c.execute('INSERT INTO tsettings VALUES (?, ?, ?, ?)',
                           (sha1, subj, tset, data))
+                conn.commit()
                 print("Successfully added CA to %s" % (truststore, )) 
             except sqlite3.OperationalError as e:
                 print("Error adding CA to %s: %s" % (truststore, e))
                 print("Mostly likely failed because TrustStore does not exist..skipping\n")
             except sqlite3.IntegrityError as e:
                 print("Error adding CA to %s: %s" % (truststore, e))
-                print("Table already has an entry with the same CA SHA1 fingerprint: %s..skipping\n" % (sha1, ))
+                print("Table already has an entry with the same CA SHA1 fingerprint: %s..skipping\n" % (certificate.get_fingerprint('sha1'), ))
+            except Error as e:
+                print("Error: %s\n" % (e, ))
             finally:
                 c.close()
 
@@ -71,13 +91,12 @@ if __name__ == "__main__":
 
     for certfile in sys.argv[1:]:
         certext = os.path.splitext(certfile)[-1].lower()
-        if certext == '.der':
+        if certext == '.der' or certext == '.cer':
             certificates.append(X509.load_cert(certfile, X509.FORMAT_DER))
-        elif certext == '.pem':
+        elif certext == '.pem' or certext == '.crt':
             certificates.append(X509.load_cert(certfile, X509.FORMAT_PEM))
+        else:
+            print('fallback')
+            certificates.append(X509.load_cert(certfile))
 
-    for sdk_dir in os.listdir(SIMULATOR_HOME):
-        if not sdk_dir.startswith('.') and sdk_dir != 'User':
-            truststore = os.path.join(SIMULATOR_HOME, sdk_dir,
-                    *TRUSTSTORE_PATH.split('/'))
-            add_certificates_to_truststore(truststore, *certificates)
+    add_certificates_to_truststore('TrustStore.sqlite3', *certificates)
